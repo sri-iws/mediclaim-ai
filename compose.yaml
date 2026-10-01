@@ -17,6 +17,33 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mediclaim-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
+      DATABASE_URL: postgres://mediclaim:mediclaim@db:5432/mediclaim
+      DATABASE_SSL: "false"
+      AI_SERVICE_URL: http://ai-service:8000
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   ai-service:
     build:
       context: ./ai-service
@@ -26,12 +53,19 @@ services:
       MAX_UPLOAD_BYTES: 15728640
       CPT_REFERENCE_CSV: ${CPT_REFERENCE_CSV:-/app/references/cpt_reference.csv}
       CPT_REFERENCE_VERSION: ${CPT_REFERENCE_VERSION:-unspecified}
+      CMS_CODE_REFERENCE_XLSX: ${CMS_CODE_REFERENCE_XLSX:-/app/public/CPT_ICD10_Codes_and_Costs_CMS_2026.xlsx}
       MEDICAL_CODES_REFERENCE_XLSX: ${MEDICAL_CODES_REFERENCE_XLSX:-/app/public/medical_codes.xlsx}
     volumes:
       - ./licensed-reference:/app/references:ro
       - ./public:/app/public:ro
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mediclaim-postgres-data:

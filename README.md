@@ -10,6 +10,12 @@ A React/Vite claims dashboard with a Node/Express API and PostgreSQL-backed pers
 4. Start the backend and frontend together with `npm run dev`.
 5. Open the Vite URL printed in the terminal (normally `http://localhost:5173`).
 
+### Run the APIs and database with Docker Compose
+
+Install and start Docker Desktop, then from the repository root run `docker compose up --build -d`. Compose builds the Node API and Python AI service and starts them with PostgreSQL. The API waits for the database and AI service health checks before starting. The frontend remains a local Vite development server; start it separately with `npm run dev` if desired. The API is at `http://localhost:3001` (health check: `/api/health`), the AI service at `http://localhost:8000`, and PostgreSQL at `localhost:5432`.
+
+Use `docker compose logs -f api ai-service db` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the `mediclaim-postgres-data` volume; `docker compose down -v` also deletes that data. For deployment, set a strong unique `JWT_SECRET` in the environment instead of using the local-development default.
+
 ### Python document-analysis service
 
 An independent FastAPI OCR and claim-review support service is available under `ai-service/`. Start it with `docker compose up -d ai-service`; it listens on `http://localhost:8000`. The create-claim form sends documents through the authenticated Node API, which proxies them to the Python service and fills detected claimant, policy, provider, amount, and diagnosis fields. See [ai-service/README.md](ai-service/README.md) for setup, request fields, and tests. Analysis is review assistance only and never makes an automated claim decision.
