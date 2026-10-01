@@ -1,0 +1,42 @@
+# MediClaim AI service
+
+A standalone FastAPI service for extracting text from medical claim documents, producing transparent human-review signals, and checking supported diagnosis/procedure codes. The authenticated Node API proxies requests to this service.
+
+## Layout
+
+- `app/api/` — HTTP routes and upload validation
+- `app/services/document_scanner.py` — PDF text extraction and Tesseract OCR
+- `app/services/claim_analysis.py` — extracted-field checks and explainable findings
+- `app/services/procedure_results.py` — live NLM Clinical Tables checks for ICD-10-CM and HCPCS Level II, plus an optional licensed CPT CSV
+- `tests/` — unit tests for analysis behavior
+
+## Run locally
+
+Use Python 3.10 or newer. Install Tesseract OCR separately and ensure `tesseract` is on `PATH`; on Windows install the Tesseract executable and English language data. From this directory, install `requirements.txt` and run `uvicorn app.main:app --reload --port 8000`.
+
+The service is also available through the root Compose configuration at `http://localhost:8000` after starting the `ai-service` service. The frontend uploads through the authenticated Node API, which forwards files here. `GET /health` checks availability. Interactive API documentation is at `/docs`.
+
+## Analyze a document
+
+`POST /api/analyze` accepts `multipart/form-data` with required `file` and optional `claimant`, `policy_number`, `provider`, `diagnosis`, and numeric `amount` fields. It extracts readable text from PDF and common image files using embedded text/OCR, and from DOCX, XLSX/XLSM, CSV/TSV, TXT/Markdown, JSON, XML, HTML, and RTF documents. Claimant, provider, policy number, diagnosis/treatment, and amount labels are mapped to the matching claim intake fields; ICD-10-CM diagnosis codes, CPT/HCPCS procedure codes, dates, and code-format checks are also returned where detectable. The response includes `extracted_fields`, a camelCase `form_fields` mapping for the claim form, and `analysis.findings`. Uploads are limited to 15 MiB by default (`MAX_UPLOAD_BYTES`); PDFs are limited to 25 pages.
+
+Example request fields:
+
+- `file`: document (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.webp`, `.bmp`, `.docx`, `.xlsx`, `.xlsm`, `.csv`, `.tsv`, `.txt`, `.md`, `.json`, `.xml`, `.html`, `.htm`, or `.rtf`)
+- `policy_number`, `provider`, `diagnosis`, `amount`: values to compare with the extracted text
+
+The initial analysis is deliberately rules-based and returns `recommendation: manual_review` with no automated claim decision. It is not a substitute for policy validation or a qualified reviewer. OCR output and heuristic findings can be incomplete or incorrect.
+
+## CPT procedure-code results
+
+`POST /api/procedure-results` accepts JSON with a `codes` string (up to 5,000 characters), and processes plain, comma-separated, parenthesized, or brace-wrapped CPT, HCPCS Level II, and ICD-10-CM values; for example `99213, A0428, E11.9`. It checks up to 10 unique codes. ICD-10-CM diagnosis and HCPCS Level II procedure codes are looked up online against the U.S. National Library of Medicine (NLM) Clinical Tables APIs (`https://clinicaltables.nlm.nih.gov/api/icd10cm/v3/search` and `https://clinicaltables.nlm.nih.gov/api/hcpcs/v3/search`) using an exact returned-code match. The response includes descriptions, the reference source, API availability, and verified/ignored counts. The API does not expose a dataset release version, so results say that the dataset is live and its release is not exposed.
+
+CPT is a licensed code set and is not included in the public NLM code APIs. CPT codes are checked first against an authorized, versioned CSV configured using `CPT_REFERENCE_CSV` and `CPT_REFERENCE_VERSION`; the CSV must contain `code` and `description` columns. With Compose, authorized licensed files can be mounted from `licensed-reference/`. Do not commit or redistribute CPT data unless its license permits it. If the ICD-10-CM API is unavailable or returns no exact match, or neither NLM nor a licensed CPT CSV can verify a CPT code, the service checks the corresponding code sheet in `public/medical_codes.xlsx`. HCPCS is checked against the NLM API; the workbook has no HCPCS reference sheet. Workbook matches are returned with `verification_status: verified_fallback` and an overall `reference_status` of `fallback` (or a partial status when other codes remain unresolved). The workbook is historical/example data, not an authoritative current code set; fallback matches must be reviewed. If no exact workbook match is found either, the response sets `reference_status: reference_gap` (or `partial_reference_gap`) and lists the unresolved code for reviewer escalation. Set `MEDICAL_CODES_REFERENCE_XLSX` to override the workbook location. No workbook pricing or CPT-to-diagnosis relationships are used or returned. Code membership does not establish medical necessity, coverage, reimbursement, or clinical appropriateness; a qualified coding professional must review results.
+
+## Tests
+
+Install `requirements-dev.txt`, then run `pytest` from this directory.
+
+## Privacy and deployment
+
+Files are processed in memory and are not persisted by this service. Do not expose the service publicly as-is: it has no authentication, authorization, rate limiting, or audit integration. In production, route calls through the authenticated Node API and apply the organization's health-data security, retention, and access-control requirements. Avoid logging document contents or sending real claimant data to unapproved external models.

@@ -1,0 +1,14 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mediclaim-gradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0D9EA7"/>
+      <stop offset="1" stop-color="#1C7CA9"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="52" height="52" rx="16" fill="url(#mediclaim-gradient)"/>
+  <path d="M21 18V27C21 34.18 26.82 40 34 40C41.18 40 47 34.18 47 27V18" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <path d="M21 17V22M47 17V22" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <path d="M34 40V46C34 50.418 37.582 54 42 54H43" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="48" cy="52" r="5" fill="white"/>
+  <circle cx="48" cy="52" r="2.2" fill="#16899E"/>
+</svg>

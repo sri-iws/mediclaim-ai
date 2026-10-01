@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: mediclaim-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mediclaim
+      POSTGRES_USER: mediclaim
+      POSTGRES_PASSWORD: mediclaim
+    ports:
+      - "5432:5432"
+    volumes:
+      - mediclaim-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mediclaim -d mediclaim"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ai-service:
+    build:
+      context: ./ai-service
+    container_name: mediclaim-ai-service
+    restart: unless-stopped
+    environment:
+      MAX_UPLOAD_BYTES: 15728640
+      CPT_REFERENCE_CSV: ${CPT_REFERENCE_CSV:-/app/references/cpt_reference.csv}
+      CPT_REFERENCE_VERSION: ${CPT_REFERENCE_VERSION:-unspecified}
+      MEDICAL_CODES_REFERENCE_XLSX: ${MEDICAL_CODES_REFERENCE_XLSX:-/app/public/medical_codes.xlsx}
+    volumes:
+      - ./licensed-reference:/app/references:ro
+      - ./public:/app/public:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  mediclaim-postgres-data:
