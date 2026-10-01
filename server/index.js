@@ -26,17 +26,13 @@ import {
 } from './db.js'
 
 const scrypt = promisify(scryptCallback)
-const tokenSecret = 'local-development-secret-change-before-deployment'
+const tokenSecret = process.env.JWT_SECRET || 'local-development-secret-change-before-deployment'
 const tokenLifetimeSeconds = 60 * 60 * 8
 const aiServiceUrl = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const BARE_FIVE_DIGIT_CODE = /(?<![\d()])(\d{5})(?![\d()])/g
 
 function normalizeFiveDigitCodes(value) {
   return String(value || '').replace(BARE_FIVE_DIGIT_CODE, '($1)')
-}
-
-if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  //throw new Error('JWT_SECRET must be configured in production.')
 }
 
 function publicUser(user) {
@@ -180,7 +176,7 @@ app.post('/api/auth/register', async (request, response) => {
     const createdUser = await insertUser(user)
     response.status(201).json({ user: publicUser(createdUser), token: signToken(createdUser), message: 'Registration successful.' })
   } catch (error) {
-    if (error.code === '23505') return response.status(409).json({ message: 'This email is already registered.' })
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return response.status(409).json({ message: 'This email is already registered.' })
     throw error
   }
 })

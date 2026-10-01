@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "concurrently -k \"npm run server\" \"vite\"",
     "server": "node server/index.js",
+    "start": "node server/index.js",
     "dev:all": "npm run dev",
-    "db:migrate": "node server/migrate-json-to-postgres.js",
+    "db:import-json": "node server/migrate-json-to-sqlite.js",
+    "db:migrate": "node server/migrate-json-to-sqlite.js",
     "build": "vite build",
     "lint": "eslint .",
     "test": "vitest run",
@@ -17,7 +19,7 @@
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
     "pdfjs-dist": "^6.3.289",
-    "pg": "^8.23.0",
+    "better-sqlite3": "^12.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.4",
@@ -33,7 +35,6 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.6",
     "globals": "^17.12.0",
-    "pg-mem": "^3.0.14",
     "vite": "^8.3.0",
     "vitest": "^5.0.2"
   }

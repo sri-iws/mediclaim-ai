@@ -1,7 +1,7 @@
 import process from 'node:process'
 import { Buffer } from 'node:buffer'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { deleteDemoUsers } from './db.js'
+import { closeDatabase, deleteDemoUsers, updateClaimStatus } from './db.js'
 
 const originalNodeEnv = process.env.NODE_ENV
 const originalJwtSecret = process.env.JWT_SECRET
@@ -9,7 +9,6 @@ process.env.NODE_ENV = 'test'
 process.env.JWT_SECRET = 'test-only-secret'
 
 const { app } = await import('./index.js')
-const { pool } = await import('./db.js')
 let server
 let baseUrl
 
@@ -35,6 +34,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (server) await new Promise((resolve) => server.close(resolve))
+  closeDatabase()
   if (originalNodeEnv === undefined) delete process.env.NODE_ENV
   else process.env.NODE_ENV = originalNodeEnv
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET
@@ -59,6 +59,10 @@ describe('MediClaim backend services', () => {
       method: 'POST',
       body: { name: 'Test Person', email: 'test@example.test', password: 'safe-password', role: 'admin' },
     })
+    const duplicateRegistration = await api('/api/auth/register', {
+      method: 'POST',
+      body: { name: 'Test Person', email: 'test@example.test', password: 'safe-password' },
+    })
     const directory = await api('/api/users', { token: login.body.token })
     const regularUserDirectory = await api('/api/users', { token: registered.body.token })
 
@@ -67,6 +71,7 @@ describe('MediClaim backend services', () => {
     expect(login.body.user.passwordHash).toBeUndefined()
     expect(registered.response.status).toBe(201)
     expect(registered.body.user.role).toBe('reviewer')
+    expect(duplicateRegistration.response.status).toBe(409)
     expect(directory.body.users).toHaveLength(4)
     expect(regularUserDirectory.response.status).toBe(403)
   })
@@ -364,7 +369,7 @@ describe('MediClaim backend services', () => {
       token: reviewer.body.token,
       body: { action: 'accept' },
     })
-    await pool.query("UPDATE claims SET status = 'approved' WHERE id = $1", [created.body.claim.id])
+    await updateClaimStatus(created.body.claim.id, 'approved')
     const reopenApproved = await api(`/api/claims/${created.body.claim.id}/review`, {
       method: 'PATCH',
       token: reviewer.body.token,

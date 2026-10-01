@@ -1,32 +1,31 @@
 # MediClaim AI
 
-A React/Vite claims dashboard with a Node/Express API and PostgreSQL-backed persistent storage.
+A React/Vite claims dashboard with a Node/Express API and SQLite-backed persistent storage.
 
 ## Run the app
 
 1. Install dependencies with `npm install`.
-2. Start PostgreSQL with Docker Compose: `docker compose up -d db`.
-3. Copy `.env.example` to `.env` (the default connection string matches the Compose database).
-4. Start the backend and frontend together with `npm run dev`.
-5. Open the Vite URL printed in the terminal (normally `http://localhost:5173`).
+2. Copy `.env.example` to `.env` if you want to configure the SQLite file path or token secret.
+3. Start the backend and frontend together with `npm run dev`.
+4. Open the Vite URL printed in the terminal (normally `http://localhost:5173`). SQLite is created automatically on first startup; no database server is required.
 
 ### Run the APIs and database with Docker Compose
 
-Install and start Docker Desktop, then from the repository root run `docker compose up --build -d`. Compose builds the Node API and Python AI service and starts them with PostgreSQL. The API waits for the database and AI service health checks before starting. The frontend remains a local Vite development server; start it separately with `npm run dev` if desired. The API is at `http://localhost:3001` (health check: `/api/health`), the AI service at `http://localhost:8000`, and PostgreSQL at `localhost:5432`.
+Install and start Docker Desktop, then from the repository root run `docker compose up --build -d`. Compose builds the Node API and Python AI service. SQLite is stored in the `mediclaim-sqlite-data` volume. The frontend remains a local Vite development server; start it separately with `npm run dev` if desired. The API is at `http://localhost:3001` (health check: `/api/health`) and the AI service at `http://localhost:8000`.
 
-Use `docker compose logs -f api ai-service db` to follow service logs and `docker compose down` to stop the stack. PostgreSQL data persists in the `mediclaim-postgres-data` volume; `docker compose down -v` also deletes that data. For deployment, set a strong unique `JWT_SECRET` in the environment instead of using the local-development default.
+Use `docker compose logs -f api ai-service` to follow service logs and `docker compose down` to stop the stack. SQLite data persists in the `mediclaim-sqlite-data` volume; `docker compose down -v` also deletes that data. Set `NODE_ENV=production` and a strong unique `JWT_SECRET` for production. The Compose file's default environment is for local development; production should use a private volume and regular backups.
 
 ### Python document-analysis service
 
 An independent FastAPI OCR and claim-review support service is available under `ai-service/`. Start it with `docker compose up -d ai-service`; it listens on `http://localhost:8000`. The create-claim form sends documents through the authenticated Node API, which proxies them to the Python service and fills detected claimant, policy, provider, amount, and diagnosis fields. See [ai-service/README.md](ai-service/README.md) for setup, request fields, and tests. Analysis is review assistance only and never makes an automated claim decision.
 
-The API listens on `http://localhost:3001`; Vite proxies `/api` requests to it. On first startup, the API creates the PostgreSQL schema and seeds demo accounts and sample policies. PostgreSQL data is persisted in the `mediclaim-postgres-data` Docker volume.
+The API listens on `http://localhost:3001`; Vite proxies `/api` requests to it. On first startup, the API creates or updates the SQLite schema and seeds demo accounts and sample policies. By default the local database is `server/data/mediclaim.sqlite`; set `SQLITE_DB_PATH` to choose another file. SQLite schema updates are applied automatically during startup.
 
 ### Migrate existing JSON data
 
-After PostgreSQL is running and `.env` is configured, import the existing `server/data/mediclaim.json` data with `npm run db:migrate`. The import is safe to rerun: records with existing IDs or emails are left unchanged. Set `MEDICLAIM_JSON_IMPORT_PATH` in `.env` if the JSON source is stored elsewhere.
+To import existing JSON records into SQLite, run `npm run db:import-json`. The import is safe to rerun: records with existing IDs, emails, or policy numbers are left unchanged. Set `MEDICLAIM_JSON_IMPORT_PATH` and `SQLITE_DB_PATH` if the source or destination is stored elsewhere. This command imports JSON data; it does not migrate records directly from a PostgreSQL server.
 
-For a hosted PostgreSQL service, set `DATABASE_URL` to its connection string and set `DATABASE_SSL=true` if required by the provider. The bundled Compose credentials are for local development only; choose strong credentials and restrict network access outside development.
+For production, set `NODE_ENV=production`, configure a strong unique `JWT_SECRET`, and set `SQLITE_DB_PATH` to durable storage writable by the Node process. Keep the SQLite file on local persistent disk and run one API instance; SQLite is not intended for multiple API replicas sharing a network-mounted database. Back up the database file and its WAL state using a consistent backup procedure.
 
 ### Local development demo accounts
 
@@ -57,16 +56,17 @@ All data endpoints require `Authorization: Bearer <token>` from the login or reg
 | `GET` | `/api/dashboard/metrics` | Signed in | Retrieve claim counts and evidence metrics |
 | `GET` | `/api/health` | Public | Check API availability |
 
-Claims, policies, and users are stored in PostgreSQL. Sample policy and demo account data are seeded locally; no external insurer, policy, or identity provider was specified, so these services are not connected to live third-party systems.
+Claims, policies, and users are stored in SQLite. Sample policy and demo account data are seeded locally; no external insurer, policy, or identity provider was specified, so these services are not connected to live third-party systems.
 
 ## Configuration
 
-Copy `.env.example` to `.env` to configure `PORT`, `JWT_SECRET`, `DATABASE_URL`, and `DATABASE_SSL`. In production, set a unique strong `JWT_SECRET`, use HTTPS, and use a managed PostgreSQL database with backups and restricted access before storing real health or identity data. The bundled demo credentials are for local development only.
+Copy `.env.example` to `.env` to configure `PORT`, `JWT_SECRET`, and `SQLITE_DB_PATH`. In production, set a unique strong `JWT_SECRET`, use HTTPS, store the SQLite file on persistent private storage, and establish tested backups before storing real health or identity data. The bundled demo credentials are for local development only.
 
 ## Checks
 
 - `npm run build` — production frontend build
 - `npm run lint` — ESLint
 - `npm test` — UI and backend API test suites
-- `npm run server` — backend only (requires PostgreSQL)
-- `npm run dev` — backend and frontend together (requires PostgreSQL)
+- `npm start` — start the backend (set `NODE_ENV=production` and `JWT_SECRET` for production)
+- `npm run server` — backend only
+- `npm run dev` — backend and frontend together

@@ -1,22 +1,4 @@
 services:
-  db:
-    image: postgres:16-alpine
-    container_name: mediclaim-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: mediclaim
-      POSTGRES_USER: mediclaim
-      POSTGRES_PASSWORD: mediclaim
-    ports:
-      - "5432:5432"
-    volumes:
-      - mediclaim-postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mediclaim -d mediclaim"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   api:
     build:
       context: .
@@ -24,17 +6,16 @@ services:
     container_name: mediclaim-api
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
-      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deployment}
-      DATABASE_URL: postgres://mediclaim:mediclaim@db:5432/mediclaim
-      DATABASE_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET:-}
+      SQLITE_DB_PATH: /data/mediclaim.sqlite
       AI_SERVICE_URL: http://ai-service:8000
     ports:
       - "3001:3001"
+    volumes:
+      - mediclaim-sqlite-data:/data
     depends_on:
-      db:
-        condition: service_healthy
       ai-service:
         condition: service_healthy
     healthcheck:
@@ -68,4 +49,4 @@ services:
       start_period: 10s
 
 volumes:
-  mediclaim-postgres-data:
+  mediclaim-sqlite-data:
