@@ -28,7 +28,7 @@ import {
 const scrypt = promisify(scryptCallback)
 const tokenSecret = process.env.JWT_SECRET || 'local-development-secret-change-before-deployment'
 const tokenLifetimeSeconds = 60 * 60 * 8
-const aiServiceUrl = (process.env.AI_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+const aiServiceUrl = (process.env.AI_SERVICE_URL || 'https://mediclaim-ai-7s0w.onrender.com').replace(/\/$/, '')
 const BARE_FIVE_DIGIT_CODE = /(?<![\d()])(\d{5})(?![\d()])/g
 
 function normalizeFiveDigitCodes(value) {
