@@ -1611,10 +1611,10 @@
 .claim-workflow {
   margin-top: 2rem;
   padding: 1.5rem;
-  border: 1px solid #dcebed;
+  border: 1px solid #b9d3d7;
   border-radius: 18px;
-  background: linear-gradient(145deg, #f6fbfb, #eef7f7);
-  box-shadow: 0 10px 24px rgba(16, 69, 78, 0.05);
+  background: linear-gradient(145deg, #e8f4f4, #deeeee);
+  box-shadow: 0 14px 30px rgba(16, 69, 78, 0.1);
 }
 
 .claim-workflow .claim-form-header {

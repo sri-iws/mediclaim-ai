@@ -25,10 +25,10 @@ const USERS = [
 const ROLE_PERMISSIONS = {
   admin: [
     'claims_review', 'policy_management', 'audit_logs', 'user_management',
-    'new_claim', 'claim_verification', 'procedure_results',
+    'new_claim', 'claim_verification',
   ],
-  auditor: ['claims_review', 'audit_logs', 'procedure_results'],
-  reviewer: ['claims_review', 'new_claim', 'claim_verification', 'procedure_results'],
+  auditor: ['claims_review', 'audit_logs'],
+  reviewer: ['claims_review', 'new_claim', 'claim_verification'],
 }
 
 export function registerUser({ name, email, password, role }) {

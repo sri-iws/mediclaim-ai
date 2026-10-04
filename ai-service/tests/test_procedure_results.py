@@ -55,6 +55,56 @@ def test_licensed_cpt_csv_validates_exact_code(monkeypatch, tmp_path) -> None:
     assert procedure_results._lookup_cpt_code("11112") is None
 
 
+def test_versioned_authorized_pricing_csv_returns_exact_cpt_range(monkeypatch, tmp_path) -> None:
+    reference = tmp_path / "cpt-pricing.csv"
+    reference.write_text(
+        "code,reference_min,reference_max,currency,source_note\n99213,85,150,USD,Office setting\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_CSV", str(reference))
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_SOURCE", "Authorized test schedule")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_VERSION", "2026-test")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_AUTHORIZED", False)
+
+    assert procedure_results._lookup_cpt_price_range("99213") is None
+
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_AUTHORIZED", True)
+
+    price_range = procedure_results._lookup_cpt_price_range("99213")
+
+    assert price_range == {
+        "reference_min": 85,
+        "reference_max": 150,
+        "currency": "USD",
+        "reference": "Authorized test schedule",
+        "reference_version": "2026-test",
+        "reference_status": "verified_authoritative",
+        "source_note": "Office setting",
+        "authoritative": True,
+    }
+    assert procedure_results._lookup_cpt_price_range("99214") is None
+
+
+def test_cpt_api_result_uses_configured_pricing_source(monkeypatch, tmp_path) -> None:
+    code_reference = tmp_path / "cpt-codes.csv"
+    code_reference.write_text("code,description\n99213,Office visit\n", encoding="utf-8")
+    pricing_reference = tmp_path / "cpt-pricing.csv"
+    pricing_reference.write_text("code,reference_min,reference_max,currency\n99213,85,150,USD\n", encoding="utf-8")
+    monkeypatch.setattr(procedure_results, "CPT_REFERENCE_CSV", str(code_reference))
+    monkeypatch.setattr(procedure_results, "CPT_REFERENCE_VERSION", "2026-code-set")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_CSV", str(pricing_reference))
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_SOURCE", "Authorized test schedule")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_VERSION", "2026-price-set")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_AUTHORIZED", True)
+
+    result = asyncio.run(procedure_results.calculate_procedure_results("99213"))
+
+    assert result["procedures"][0]["cost"]["reference_status"] == "verified_authoritative"
+    assert result["procedures"][0]["cost"]["reference"] == "Authorized test schedule"
+    assert result["pricing_reference_status"] == "verified_authoritative"
+    assert result["authoritative_priced_cpt_count"] == 1
+
+
 def test_live_reference_verifies_exact_hcpcs_and_icd10_codes(monkeypatch) -> None:
     async def fake_lookup(code, system):
         entries = {
@@ -111,6 +161,10 @@ def test_api_failure_finds_real_codes_in_medical_codes_workbook(monkeypatch) -> 
     assert result["reference_status"] == "fallback"
     assert result["fallback_count"] == 2
     assert result["procedures"][0]["description"] == "COVID-19 antigen test"
+    assert result["procedures"][0]["cost"]["reference_min"] == 15
+    assert result["procedures"][0]["cost"]["reference_max"] == 50
+    assert result["procedures"][0]["cost"]["reference_status"] == "historical_example"
+    assert result["procedures"][0]["cost"]["authoritative"] is False
     assert result["diagnoses"][0]["description"] == "Influenza due to identified novel influenza A virus"
     assert all(item["verification_status"] == "verified_fallback" for item in result["procedures"] + result["diagnoses"])
 
@@ -141,10 +195,18 @@ def test_api_no_match_checks_workbook_before_verifying_diagnosis(monkeypatch) ->
 def test_cpt_uses_workbook_as_fallback_when_public_api_does_not_cover_it(monkeypatch) -> None:
     monkeypatch.setattr(procedure_results, "CPT_REFERENCE_CSV", "")
     monkeypatch.setattr(procedure_results, "CPT_REFERENCE_VERSION", "unspecified")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_CSV", "")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_AUTHORIZED", False)
     monkeypatch.setattr(
         procedure_results,
         "_lookup_workbook_code",
-        lambda code, system: {"Description": "Office visit example"} if (code, system) == ("99213", "CPT") else None,
+        lambda code, system: {
+            "Description": "Office visit example",
+            "Min Cost": 85,
+            "Max Cost": 110,
+            "Status": "Active",
+            "First Found": "Receipt example",
+        } if (code, system) == ("99213", "CPT") else None,
     )
 
     result = asyncio.run(procedure_results.calculate_procedure_results("99213"))
@@ -155,11 +217,38 @@ def test_cpt_uses_workbook_as_fallback_when_public_api_does_not_cover_it(monkeyp
     assert result["procedures"][0]["verification_status"] == "verified_fallback"
     assert result["procedures"][0]["description"] == "Office visit example"
     assert result["procedures"][0]["reference_version"] == "2024 example data"
+    assert result["procedures"][0]["cost"] == {
+        "reference_min": 85,
+        "reference_max": 110,
+        "currency": "USD",
+        "reference": "medical_codes.xlsx",
+        "reference_version": "2024 example data",
+        "reference_status": "historical_example",
+        "source_note": "Receipt example",
+        "authoritative": False,
+    }
+    assert result["pricing_reference_status"] == "historical_example"
+    assert result["priced_cpt_count"] == 1
+
+
+def test_cpt_workbook_price_range_rejects_inactive_or_reversed_ranges() -> None:
+    assert procedure_results._workbook_cpt_price_range({
+        "Min Cost": 85,
+        "Max Cost": 110,
+        "Status": "Inactive",
+    }) is None
+    assert procedure_results._workbook_cpt_price_range({
+        "Min Cost": 110,
+        "Max Cost": 85,
+        "Status": "Active",
+    }) is None
 
 
 def test_cpt_is_unverified_without_a_licensed_reference(monkeypatch) -> None:
     monkeypatch.setattr(procedure_results, "CPT_REFERENCE_CSV", "")
     monkeypatch.setattr(procedure_results, "CPT_REFERENCE_VERSION", "unspecified")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_CSV", "")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_AUTHORIZED", False)
     monkeypatch.setattr(procedure_results, "_lookup_workbook_code", lambda *_args: None)
 
     result = asyncio.run(procedure_results.calculate_procedure_results("99213"))
@@ -176,6 +265,8 @@ def test_licensed_cpt_csv_can_verify_cpt_without_workbook_data(monkeypatch, tmp_
     reference.write_text("code,description\n99213,Office or other outpatient visit\n", encoding="utf-8")
     monkeypatch.setattr(procedure_results, "CPT_REFERENCE_CSV", str(reference))
     monkeypatch.setattr(procedure_results, "CPT_REFERENCE_VERSION", "2026-release")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_CSV", "")
+    monkeypatch.setattr(procedure_results, "CPT_PRICING_REFERENCE_AUTHORIZED", False)
     monkeypatch.setattr(procedure_results, "_query_reference_api", lambda *_args: pytest.fail("CPT must not use NLM API"))
 
     result = asyncio.run(procedure_results.calculate_procedure_results("99213"))

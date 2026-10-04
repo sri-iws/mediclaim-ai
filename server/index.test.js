@@ -5,8 +5,10 @@ import { closeDatabase, deleteDemoUsers, updateClaimStatus } from './db.js'
 
 const originalNodeEnv = process.env.NODE_ENV
 const originalJwtSecret = process.env.JWT_SECRET
+const originalAiServiceUrl = process.env.AI_SERVICE_URL
 process.env.NODE_ENV = 'test'
 process.env.JWT_SECRET = 'test-only-secret'
+process.env.AI_SERVICE_URL = 'http://127.0.0.1:8000'
 
 const { app } = await import('./index.js')
 let server
@@ -39,6 +41,8 @@ afterAll(async () => {
   else process.env.NODE_ENV = originalNodeEnv
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET
   else process.env.JWT_SECRET = originalJwtSecret
+  if (originalAiServiceUrl === undefined) delete process.env.AI_SERVICE_URL
+  else process.env.AI_SERVICE_URL = originalAiServiceUrl
 })
 
 describe('MediClaim backend services', () => {
@@ -63,6 +67,10 @@ describe('MediClaim backend services', () => {
       method: 'POST',
       body: { name: 'Test Person', email: 'test@example.test', password: 'safe-password' },
     })
+    const registeredUserLogin = await api('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'test@example.test', password: 'safe-password' },
+    })
     const directory = await api('/api/users', { token: login.body.token })
     const regularUserDirectory = await api('/api/users', { token: registered.body.token })
 
@@ -71,6 +79,8 @@ describe('MediClaim backend services', () => {
     expect(login.body.user.passwordHash).toBeUndefined()
     expect(registered.response.status).toBe(201)
     expect(registered.body.user.role).toBe('reviewer')
+    expect(registeredUserLogin.response.status).toBe(200)
+    expect(registeredUserLogin.body.user.email).toBe('test@example.test')
     expect(duplicateRegistration.response.status).toBe(409)
     expect(directory.body.users).toHaveLength(4)
     expect(regularUserDirectory.response.status).toBe(403)

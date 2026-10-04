@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { assessClaimReference, getClaimVerificationCodes } from './claimVerification'
 
+const verifiedCptPrice = (reference_min, reference_max) => ({
+  reference_min,
+  reference_max,
+  currency: 'USD',
+  reference: 'Test licensed pricing schedule',
+  reference_version: '2026-test',
+  reference_status: 'verified_authoritative',
+  authoritative: true,
+})
+
 describe('claim reference verification', () => {
   it('collects detected procedure and diagnosis codes from document analysis', () => {
     const codes = getClaimVerificationCodes({
@@ -41,14 +51,14 @@ describe('claim reference verification', () => {
       treatmentItems: [{ code: '99213', name: 'Office visit', billedPrice: 120 }],
     }
     const assessment = assessClaimReference(claim, {
-      procedures: [{ code: '99213', description: 'Office visit', cost: { reference_min: 85, reference_max: 150 } }],
+      procedures: [{ code: '99213', system: 'CPT', description: 'Office visit', cost: verifiedCptPrice(85, 150) }],
       diagnoses: [],
       ignored_codes: [],
     })
 
     expect(getClaimVerificationCodes(claim)).toEqual(['99213'])
-    expect(assessment.priceChecks).toEqual([
-      { code: '99213', amount: 120, minimum: 85, maximum: 150, result: 'within_range' },
+    expect(assessment.priceChecks).toMatchObject([
+      { code: '99213', amount: 120, minimum: 85, maximum: 150, reference: 'Test licensed pricing schedule', referenceVersion: '2026-test', authoritative: true, result: 'within_range' },
     ])
     expect(assessment.findings.join(' ')).toContain('billed price for CPT 99213')
   })
@@ -75,7 +85,7 @@ describe('claim reference verification', () => {
     const assessment = assessClaimReference(
       { amount: 250, documentAnalysis: { extracted: { procedureCode: '99213' } } },
       {
-        procedures: [{ code: '99213', cost: { reference_min: 85, reference_max: 150 } }],
+        procedures: [{ code: '99213', system: 'CPT', cost: verifiedCptPrice(85, 150) }],
         diagnoses: [],
         ignored_codes: [],
       },
@@ -83,7 +93,7 @@ describe('claim reference verification', () => {
 
     expect(assessment.priority).toBe('escalation')
     expect(assessment.label).toContain('reviewer assessment required')
-    expect(assessment.findings.join(' ')).toContain('outside the available range')
+    expect(assessment.findings.join(' ')).toContain('outside the range from Test licensed pricing schedule')
     expect(assessment).not.toHaveProperty('decision')
   })
 
@@ -92,8 +102,8 @@ describe('claim reference verification', () => {
       { amount: 250, documentAnalysis: { extracted: { cptCodes: ['99213', '99214'] } } },
       {
         procedures: [
-          { code: '99213', cost: { reference_min: 85, reference_max: 150 } },
-          { code: '99214', cost: { reference_min: 140, reference_max: 220 } },
+          { code: '99213', system: 'CPT', cost: verifiedCptPrice(85, 150) },
+          { code: '99214', system: 'CPT', cost: verifiedCptPrice(140, 220) },
         ],
         diagnoses: [],
         ignored_codes: [],
@@ -112,17 +122,17 @@ describe('claim reference verification', () => {
       },
       {
         procedures: [
-          { code: '99213', cost: { reference_min: 85, reference_max: 150 } },
-          { code: '99214', cost: { reference_min: 140, reference_max: 220 } },
+          { code: '99213', system: 'CPT', cost: verifiedCptPrice(85, 150) },
+          { code: '99214', system: 'CPT', cost: verifiedCptPrice(140, 220) },
         ],
         diagnoses: [],
         ignored_codes: [],
       },
     )
 
-    expect(assessment.priceChecks).toEqual([
-      { code: '99213', amount: 120, minimum: 85, maximum: 150, result: 'within_range' },
-      { code: '99214', amount: 240, minimum: 140, maximum: 220, result: 'outside_range' },
+    expect(assessment.priceChecks).toMatchObject([
+      { code: '99213', amount: 120, minimum: 85, maximum: 150, reference: 'Test licensed pricing schedule', referenceVersion: '2026-test', authoritative: true, result: 'within_range' },
+      { code: '99214', amount: 240, minimum: 140, maximum: 220, reference: 'Test licensed pricing schedule', referenceVersion: '2026-test', authoritative: true, result: 'outside_range' },
     ])
     expect(assessment.priority).toBe('escalation')
     expect(assessment.recommendation).toBe('manual_review')
@@ -136,8 +146,8 @@ describe('claim reference verification', () => {
       },
       {
         procedures: [
-          { code: '99213', cost: { reference_min: 85, reference_max: 150 } },
-          { code: '99214', cost: { reference_min: 140, reference_max: 220 } },
+          { code: '99213', system: 'CPT', cost: verifiedCptPrice(85, 150) },
+          { code: '99214', system: 'CPT', cost: verifiedCptPrice(140, 220) },
         ],
         diagnoses: [],
         ignored_codes: [],
@@ -157,8 +167,8 @@ describe('claim reference verification', () => {
       },
       {
         procedures: [
-          { code: '99213', cost: { reference_min: 85, reference_max: 150 } },
-          { code: '99214', cost: { reference_min: 140, reference_max: 220 } },
+          { code: '99213', system: 'CPT', cost: verifiedCptPrice(85, 150) },
+          { code: '99214', system: 'CPT', cost: verifiedCptPrice(140, 220) },
         ],
         diagnoses: [],
         ignored_codes: [],
@@ -188,6 +198,64 @@ describe('claim reference verification', () => {
       },
     )
 
+    expect(assessment.recommendation).toBe('manual_review')
+  })
+
+  it('compares a workbook example range but never recommends approval from it', () => {
+    const assessment = assessClaimReference(
+      { amount: 100, documentAnalysis: { extracted: { procedureCode: '99213' } } },
+      {
+        procedures: [{
+          code: '99213',
+          system: 'CPT',
+          cost: {
+            reference_min: 85,
+            reference_max: 110,
+            currency: 'USD',
+            reference: 'medical_codes.xlsx',
+            reference_version: '2024 example data',
+            reference_status: 'historical_example',
+            authoritative: false,
+          },
+        }],
+        diagnoses: [],
+        ignored_codes: [],
+      },
+    )
+
+    expect(assessment.priceChecks[0].result).toBe('within_range')
+    expect(assessment.priceChecks[0].authoritative).toBe(false)
+    expect(assessment.pricingReferenceStatus).toBe('historical_example')
+    expect(assessment.recommendation).toBe('manual_review')
+  })
+
+  it('does not compare numeric ranges without source and version provenance', () => {
+    const assessment = assessClaimReference(
+      { amount: 100, documentAnalysis: { extracted: { procedureCode: '99213' } } },
+      {
+        procedures: [{ code: '99213', system: 'CPT', cost: { reference_min: 85, reference_max: 110 } }],
+        diagnoses: [],
+        ignored_codes: [],
+      },
+    )
+
+    expect(assessment.priceChecks[0].result).toBe('range_unavailable')
+    expect(assessment.pricingReferenceStatus).toBe('unavailable')
+    expect(assessment.recommendation).toBe('manual_review')
+  })
+
+  it('does not compare a reference range in a different currency', () => {
+    const assessment = assessClaimReference(
+      { amount: 100, documentAnalysis: { extracted: { procedureCode: '99213' } } },
+      {
+        procedures: [{ code: '99213', system: 'CPT', cost: { ...verifiedCptPrice(85, 110), currency: 'EUR' } }],
+        diagnoses: [],
+        ignored_codes: [],
+      },
+    )
+
+    expect(assessment.priceChecks[0].result).toBe('range_unavailable')
+    expect(assessment.pricingReferenceStatus).toBe('unavailable')
     expect(assessment.recommendation).toBe('manual_review')
   })
 })

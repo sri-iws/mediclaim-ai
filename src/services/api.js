@@ -86,13 +86,6 @@ export async function analyzeClaimDocument(file, claimFields = {}) {
   return result
 }
 
-export async function fetchProcedureResults(codes) {
-  return request('/api/procedure-results', {
-    method: 'POST',
-    body: { codes },
-  })
-}
-
 export async function saveClaimReview(claimId, { action, comment = '' }) {
   const { claim } = await request(`/api/claims/${encodeURIComponent(claimId)}/review`, {
     method: 'PATCH',

@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'https://mediclaim-ai-2.onrender.com',
+      '/api': 'http://127.0.0.1:3001',
     },
   },
 })

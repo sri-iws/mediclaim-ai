@@ -4,7 +4,8 @@ import logo from '../assets/mediclaim-logo.svg'
 import { getRoleLabel, hasAccess } from '../auth'
 import { assessClaimReference, getClaimVerificationCodes } from '../claimVerification'
 import { ClaimIntakeForm } from '../components/ClaimIntakeForm'
-import { fetchDashboardMetrics, fetchProcedureResults } from '../services/api'
+import { fetchDashboardMetrics } from '../services/api'
+import { verifyCodesWithWorkbook } from '../medicalCodesReference'
 
 const accessModules = [
   {
@@ -50,7 +51,6 @@ const DASHBOARD_TABS = [
   { id: 'dashboard', label: 'Dashboard', permission: null },
   { id: 'new-claim', label: 'New claim', permission: 'new_claim' },
   { id: 'claim-verification', label: 'Claim verification', permission: 'claim_verification' },
-  { id: 'procedure-results', label: 'Procedure results', permission: 'procedure_results' },
 ]
 
 function DashboardTopbar({ user, onLogout, activeTab, onNavigate }) {
@@ -486,15 +486,40 @@ function ReviewerDashboardPage({ user, onLogout, reviewQueue, claims, onOpenClai
   )
 }
 
-function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
+function ClaimVerificationPage({ user, onLogout, claims, onSaveReview, onNavigateTab }) {
   const [selectedClaimId, setSelectedClaimId] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [escalating, setEscalating] = useState(false)
+  const [escalationMessage, setEscalationMessage] = useState('')
   const requestVersion = useRef(0)
   const selectedClaim = claims.find((claim) => claim.id === selectedClaimId)
   const claimCodes = selectedClaim ? getClaimVerificationCodes(selectedClaim) : []
   const assessment = result && selectedClaim ? assessClaimReference(selectedClaim, result) : null
+  const hasReferenceGap = ['reference_gap', 'partial_reference_gap'].includes(result?.reference_status)
+  const mayEscalate = ['reviewer', 'admin'].includes(user.role)
+    && selectedClaim
+    && !['accepted', 'rejected', 'escalated'].includes(String(selectedClaim.status).toLowerCase())
+
+  const handleEscalateReferenceGap = async () => {
+    if (!selectedClaim || !onSaveReview) return
+    setEscalating(true)
+    setEscalationMessage('')
+    try {
+      const checkedCount = Number(result?.workbook_checked_count || 0)
+      const unmatchedCount = Number(result?.ignored_count ?? result?.ignored_codes?.length ?? 0)
+      await onSaveReview(selectedClaim.id, {
+        action: 'escalate',
+        comment: `Reference gap after checking medical_codes.xlsx (${checkedCount} workbook entr${checkedCount === 1 ? 'y' : 'ies'} checked; ${unmatchedCount} code(s) remain unverified). Qualified reviewer follow-up requested.`,
+      })
+      setEscalationMessage(`Claim ${selectedClaim.id} status updated to escalated for qualified review.`)
+    } catch (escalationError) {
+      setEscalationMessage(escalationError.message || 'Unable to escalate this claim. Please try again.')
+    } finally {
+      setEscalating(false)
+    }
+  }
 
   const handleVerificationClaimSelect = async (event) => {
     const selectedId = event.target.value
@@ -503,6 +528,7 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
     setSelectedClaimId(selectedId)
     setResult(null)
     setError('')
+    setEscalationMessage('')
     setBusy(false)
     const claim = claims.find((item) => item.id === selectedId)
     const codes = claim ? getClaimVerificationCodes(claim) : []
@@ -514,7 +540,7 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
 
     setBusy(true)
     try {
-      const verification = await fetchProcedureResults(codes.join(', '))
+      const verification = await verifyCodesWithWorkbook(codes)
       if (requestVersion.current === requestId) setResult(verification)
     } catch (verificationError) {
       if (requestVersion.current === requestId) setError(verificationError.message)
@@ -532,7 +558,7 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
             <div>
               <span className="eyebrow">Claim review support</span>
               <h2>Claim verification</h2>
-              <p>Check detected diagnosis and procedure codes against live NLM Clinical Tables data. If a code is not returned by the online source, the service also checks medical_codes.xlsx before reporting a reference gap. Workbook matches are historical examples, not authoritative coding guidance.</p>
+              <p>Compare detected diagnosis and procedure codes, and CPT minimum and maximum prices, against medical_codes.xlsx. Workbook matches are historical examples, not authoritative coding guidance.</p>
             </div>
           </div>
 
@@ -553,7 +579,7 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
             )}
           </div>
 
-          {busy && <p className="procedure-result-note" role="status">Checking diagnosis and HCPCS codes against the live reference API…</p>}
+          {busy && <p className="procedure-result-note" role="status">Checking codes and price ranges against medical_codes.xlsx…</p>}
           {error && <p className="status error procedure-results-message" role="alert">{error}</p>}
 
           {assessment && (
@@ -562,17 +588,32 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
                 <span className="eyebrow">Reference review signal</span>
                 <h3 className={`assessment-label ${assessment.recommendation === 'approve' ? 'assessment-label-success' : ''} ${assessment.label.startsWith('⚠') ? 'assessment-label-danger' : ''}`}>{assessment.label}</h3>
               </div>
+              {hasReferenceGap && (
+                <div className="audit-check-group audit-check-warning" role="status">
+                  <h4>Reference gap — qualified review recommended</h4>
+                  <p>{result.ignored_count ?? result.ignored_codes?.length ?? 0} code(s) remain unmatched after {result.workbook_checked_count ?? 0} exact lookup(s) in medical_codes.xlsx. Any unmatched values remain unverified and should be reviewed by a qualified person.</p>
+                  {mayEscalate && (
+                    <button type="button" className="secondary-button" onClick={handleEscalateReferenceGap} disabled={escalating}>
+                      {escalating ? 'Escalating…' : 'Escalate claim for qualified review'}
+                    </button>
+                  )}
+                  {escalationMessage && <p role="status">{escalationMessage}</p>}
+                  {String(selectedClaim?.status).toLowerCase() === 'escalated' && <p>This claim is already escalated for qualified review.</p>}
+                  {!mayEscalate && String(selectedClaim?.status).toLowerCase() !== 'escalated' && <p>Only an authorized reviewer can update the claim status. Reference verification does not make a coverage or reimbursement decision.</p>}
+                </div>
+              )}
               <div className="audit-check-group">
                 <h4>Findings</h4>
                 <ul>{assessment.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
               </div>
               {assessment.priceChecks.length > 0 && (
                 <div className="audit-check-group audit-check-warning">
-                  <h4>CPT price-to-range decision</h4>
+                  <h4>CPT price-to-range decision · {assessment.pricingReferenceStatus === 'verified_authoritative' ? 'versioned reference checked' : assessment.pricingReferenceStatus === 'historical_example' ? 'example reference only' : assessment.pricingReferenceStatus === 'mixed' ? 'mixed reference sources' : 'valid pricing reference unavailable'}</h4>
                   <ul>{assessment.priceChecks.map((check) => (
                     <li key={`${check.code}-${check.amount}`}>
                       <strong>{check.code}</strong> · Extracted amount {Number.isFinite(check.amount) ? `$${check.amount.toLocaleString()}` : 'unavailable'}
-                      {Number.isFinite(check.minimum) && Number.isFinite(check.maximum) ? ` · Reference range $${check.minimum.toLocaleString()}–$${check.maximum.toLocaleString()}` : ''}
+                      {Number.isFinite(check.minimum) && Number.isFinite(check.maximum) ? ` · Reference range ${check.currency || 'USD'} ${check.minimum.toLocaleString()}–${check.maximum.toLocaleString()}` : ''}
+                      {check.reference && ` · Source: ${check.reference}${check.referenceVersion ? ` (${check.referenceVersion})` : ''}${check.sourceNote ? ` · ${check.sourceNote}` : ''}${check.authoritative ? '' : ' · historical/example only'}`}
                       {check.result === 'within_range' ? ' · Within range' : check.result === 'outside_range' ? ' · Outside range—review required' : ' · Range unavailable'}
                     </li>
                   ))}</ul>
@@ -584,7 +625,7 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
                   <ul>{assessment.procedures.map((procedure) => (
                     <li key={procedure.code}>
                       <strong>{procedure.code}</strong> · {procedure.description || 'Procedure description unavailable'}
-                      {procedure.cost?.reference_min !== undefined && ` · Example range $${procedure.cost.reference_min}–$${procedure.cost.reference_max}`}
+                      {procedure.cost?.reference_min !== undefined && ` · ${procedure.cost.authoritative ? 'Versioned price range' : 'Historical/example range'} ${procedure.cost.currency || 'USD'} ${procedure.cost.reference_min}–${procedure.cost.reference_max}${procedure.cost.reference ? ` · ${procedure.cost.reference}${procedure.cost.reference_version ? ` (${procedure.cost.reference_version})` : ''}` : ''}`}
                       {procedure.cost?.observed_min_allowed !== undefined && ` · Observed range $${procedure.cost.observed_min_allowed}–$${procedure.cost.observed_max_allowed} ${procedure.cost.currency || 'USD'}`}
                     </li>
                   ))}</ul>
@@ -614,138 +655,6 @@ function ClaimVerificationPage({ user, onLogout, claims, onNavigateTab }) {
   )
 }
 
-function ProcedureResultsPage({ user, onLogout, claims, initialDocumentAnalysis, onNavigateTab }) {
-  const [diagnosis, setDiagnosis] = useState(() => {
-    const extractedCodes = getClaimVerificationCodes({ documentAnalysis: initialDocumentAnalysis })
-    return extractedCodes.join(', ')
-  })
-  const [selectedClaimId, setSelectedClaimId] = useState(initialDocumentAnalysis ? 'current-document' : '')
-  const [result, setResult] = useState(null)
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const setCodesForClaim = (claim, documentAnalysis) => {
-    const verificationCodes = claim ? getClaimVerificationCodes(claim) : getClaimVerificationCodes({ documentAnalysis })
-    setDiagnosis(verificationCodes.join(', '))
-    setResult(null)
-    setError('')
-  }
-
-  const handleClaimSelect = (event) => {
-    const selectedId = event.target.value
-    setSelectedClaimId(selectedId)
-    if (selectedId === 'current-document') {
-      setCodesForClaim(null, initialDocumentAnalysis)
-      return
-    }
-    const claim = claims.find((item) => item.id === selectedId)
-    if (claim) setCodesForClaim(claim)
-    else {
-      setDiagnosis('')
-      setResult(null)
-      setError('')
-    }
-  }
-
-  const handleSubmit = async (event) => {
-    event.preventDefault()
-    setBusy(true)
-    setResult(null)
-    setError('')
-    try {
-      setResult(await fetchProcedureResults(diagnosis))
-    } catch (predictionError) {
-      setError(predictionError.message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="page-shell dashboard-shell">
-      <DashboardTopbar user={user} onLogout={onLogout} activeTab="procedure-results" onNavigate={onNavigateTab} />
-      <main className="container dashboard-main">
-        <section className="dashboard-panel access-panel dashboard-overview procedure-results-page">
-          <div className="dashboard-header">
-            <div>
-              <span className="eyebrow">Live code reference</span>
-              <h2>Verify procedure and diagnosis codes</h2>
-              <p>ICD-10-CM diagnoses and HCPCS Level II procedures are checked against the live U.S. National Library of Medicine (NLM) Clinical Tables API. CPT is not available from that public API and requires an authorized, versioned CPT reference CSV. Code membership does not establish coverage or clinical appropriateness.</p>
-            </div>
-          </div>
-
-          <form className="procedure-results-form" onSubmit={handleSubmit}>
-            <label htmlFor="prediction-claim">Use a submitted claim <span>(optional)</span></label>
-            <select id="prediction-claim" value={selectedClaimId} onChange={handleClaimSelect}>
-              <option value="">Enter codes manually</option>
-              {initialDocumentAnalysis && <option value="current-document">Current scanned document</option>}
-              {claims.map((claim) => (
-                <option key={claim.id} value={claim.id}>{claim.id} · {claim.claimant} · {getClaimVerificationCodes(claim).length} code(s)</option>
-              ))}
-            </select>
-
-            <label htmlFor="prediction-diagnosis">CPT, HCPCS Level II, and ICD-10-CM code(s)</label>
-            <textarea
-              id="prediction-diagnosis"
-              value={diagnosis}
-              onChange={(event) => { setDiagnosis(event.target.value); setResult(null) }}
-              maxLength={5000}
-              rows={6}
-              required
-              placeholder="Examples: 99213, A0428, E11.9"
-            />
-            <div className="procedure-results-form-footer">
-              <small>{diagnosis.length}/5000 characters · Enter procedure and/or diagnosis codes, comma-separated. CPT requires a configured licensed reference.</small>
-              <button type="submit" className="primary-button" disabled={busy || !diagnosis.trim()}>
-                {busy ? 'Checking reference…' : 'Verify codes'}
-              </button>
-            </div>
-          </form>
-
-          {error && <p className="status error procedure-results-message" role="alert">{error}</p>}
-
-          {result && (
-            <section className="procedure-results-results" aria-live="polite">
-              <div className="claim-form-header">
-                <span className="eyebrow">{result.reference_status === 'fallback' ? 'Workbook fallback matches' : ['partial', 'partial_fallback', 'partial_reference_gap'].includes(result.reference_status) ? 'Partially verified codes' : result.reference_status === 'reference_gap' ? 'Reference gap — consider escalation to a qualified reviewer' : 'Code reference results'}</span>
-                <h3>{result.verified_count ?? result.procedures.length + (result.diagnoses?.length || 0)} verified code(s)</h3>
-              </div>
-              {result.message && <p className="procedure-result-note" role="status">{result.message}</p>}
-              {result.reference_status === 'unavailable' ? (
-                <p className="procedure-result-note" role="status">{result.message}</p>
-              ) : result.procedures.length || result.diagnoses?.length ? (
-                <ol className="procedure-result-list">
-                  {[...result.procedures, ...(result.diagnoses || [])].map((candidate) => (
-                    <li className="procedure-result-card" key={`${candidate.system}-${candidate.code}`}>
-                      <div className="procedure-result-header">
-                        <strong>{candidate.code && <code>{candidate.code} · </code>}{candidate.description}</strong>
-                        <span>{candidate.system} verified · {candidate.reference || 'Reference match'}</span>
-                      </div>
-                      {candidate.evidence?.length > 0 && <small className="procedure-result-evidence">Code: {candidate.evidence.join(' · ')}</small>}
-                      {candidate.cost && <small className="procedure-result-evidence">Observed Medicare allowed amount: {candidate.cost.currency} {candidate.cost.observed_min_allowed}–{candidate.cost.observed_max_allowed} (median {candidate.cost.observed_median_allowed}); provider-specific example only.</small>}
-                      <p>{candidate.explanation}</p>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="procedure-result-note">No codes matched the available online and medical_codes.xlsx references. Confirm the code values and consider escalation to a qualified reviewer.</p>
-              )}
-              {result.code_relationships?.length > 0 && <div className="audit-check-group procedure-ignored-codes"><h4>Example CPT–diagnosis relationships</h4><ul>{result.code_relationships.map((relationship) => <li key={`${relationship.cpt_code}-${relationship.icd10_code}`}>{relationship.cpt_code} ↔ {relationship.icd10_code}: {relationship.note} Example only; documentation determines coding.</li>)}</ul></div>}
-              {result.ignored_codes?.length > 0 && (
-                <div className="audit-check-group audit-check-warning procedure-ignored-codes" role="status">
-                  <h4>Ignored unverified values</h4>
-                  <ul>{result.ignored_codes.map((item, index) => <li key={`${item.system || 'code'}-${item.value}-${index}`}>{item.system ? `${item.system} ` : ''}{item.value}: {item.reason}</li>)}</ul>
-                </div>
-              )}
-              <p className="procedure-results-disclaimer" role="note">{result.disclaimer}</p>
-            </section>
-          )}
-        </section>
-      </main>
-    </div>
-  )
-}
-
 export function DashboardPage({ user, onLogout, claimForm, onClaimChange, onClaimSubmit, onClaimExtracted, onClaimReset, claims, onSaveReview, onReopenClaim, onDeleteClaim, selectedClaimFiles = [], status }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -758,7 +667,7 @@ export function DashboardPage({ user, onLogout, claimForm, onClaimChange, onClai
     ? 'new-claim'
     : normalizedPath.endsWith('/claim-verification')
       ? 'claim-verification'
-      : normalizedPath.endsWith('/procedure-results') ? 'procedure-results' : 'dashboard'
+      : 'dashboard'
   const selectedClaim = claims.find((claim) => claim.id === selectedClaimId) || null
   const openClaim = (claim) => setSelectedClaimId(claim.id)
   const closeClaim = () => setSelectedClaimId('')
@@ -766,7 +675,7 @@ export function DashboardPage({ user, onLogout, claimForm, onClaimChange, onClai
     ? '/dashboard/new-claim'
     : tab === 'claim-verification'
       ? '/dashboard/claim-verification'
-      : tab === 'procedure-results' ? '/dashboard/procedure-results' : '/dashboard')
+      : '/dashboard')
 
   useEffect(() => {
     let active = true
@@ -776,19 +685,6 @@ export function DashboardPage({ user, onLogout, claimForm, onClaimChange, onClai
     return () => { active = false }
   }, [claims])
 
-  if (activeTab === 'procedure-results') {
-    if (!hasAccess(userRole, 'procedure_results')) return <Navigate to="/dashboard" replace />
-    return (
-      <ProcedureResultsPage
-        user={user}
-        onLogout={onLogout}
-        claims={claims}
-        initialDocumentAnalysis={claimForm.documentAnalysis}
-        onNavigateTab={onNavigateTab}
-      />
-    )
-  }
-
   if (activeTab === 'claim-verification') {
     if (!hasAccess(userRole, 'claim_verification')) return <Navigate to="/dashboard" replace />
     return (
@@ -796,6 +692,7 @@ export function DashboardPage({ user, onLogout, claimForm, onClaimChange, onClai
         user={user}
         onLogout={onLogout}
         claims={claims}
+        onSaveReview={onSaveReview}
         onNavigateTab={onNavigateTab}
       />
     )
