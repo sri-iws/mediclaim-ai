@@ -22,6 +22,10 @@ server/data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*/.pytest_cache/
+*/.venv/
+*/.env
+*/.env.*
 
 # Editor directories and files
 .vscode/*
