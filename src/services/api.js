@@ -1,5 +1,11 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
+function handleUnauthorized() {
+  localStorage.removeItem('mediclaim-token')
+  localStorage.removeItem('mediclaim-user')
+  window.dispatchEvent(new Event('mediclaim:unauthorized'))
+}
+
 async function request(path, { method = 'GET', body, authenticated = true } = {}) {
   const token = localStorage.getItem('mediclaim-token')
   const headers = { Accept: 'application/json' }
@@ -8,7 +14,7 @@ async function request(path, { method = 'GET', body, authenticated = true } = {}
 
   let response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(`${API_BASE_URL}/api${path}`, {
       method,
       headers,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -18,34 +24,44 @@ async function request(path, { method = 'GET', body, authenticated = true } = {}
   }
 
   const result = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(result.message || `Request failed (${response.status}).`)
+  if (response.status === 401 && authenticated) {
+    handleUnauthorized()
+    const error = new Error('Your session has expired or is no longer valid. Please sign in again.')
+    error.status = 401
+    throw error
+  }
+  if (!response.ok) {
+    const error = new Error(result.message || `Request failed (${response.status}).`)
+    error.status = response.status
+    throw error
+  }
   return result
 }
 
 export async function loginWithApi(email, password) {
-  return request('/api/auth/login', { method: 'POST', body: { email, password }, authenticated: false })
+  return request('/auth/login', { method: 'POST', body: { email, password }, authenticated: true })
 }
 
 export async function registerWithApi({ name, email, password }) {
-  return request('/api/auth/register', {
+  return request('/auth/register', {
     method: 'POST',
     body: { name, email, password },
-    authenticated: false,
+    authenticated: true,
   })
 }
 
 export async function fetchClaims() {
-  const { claims } = await request('/api/claims')
+  const { claims } = await request('/claims')
   return claims
 }
 
 export async function submitClaim(claim) {
-  const { claim: created } = await request('/api/claims', { method: 'POST', body: claim })
+  const { claim: created } = await request('/claims', { method: 'POST', body: claim })
   return created
 }
 
 export async function deleteClaim(claimId) {
-  return request(`/api/claims/${encodeURIComponent(claimId)}`, { method: 'DELETE' })
+  return request(`/claims/${encodeURIComponent(claimId)}`, { method: 'DELETE' })
 }
 
 export async function analyzeClaimDocument(file, claimFields = {}) {
@@ -78,6 +94,12 @@ export async function analyzeClaimDocument(file, claimFields = {}) {
   }
 
   const result = await response.json().catch(() => ({}))
+  if (response.status === 401) {
+    handleUnauthorized()
+    const error = new Error('Your session has expired or is no longer valid. Please sign in again.')
+    error.status = 401
+    throw error
+  }
   if (!response.ok) {
     const error = new Error(result.message || `Document analysis failed (${response.status}).`)
     error.status = response.status
@@ -87,7 +109,7 @@ export async function analyzeClaimDocument(file, claimFields = {}) {
 }
 
 export async function saveClaimReview(claimId, { action, comment = '' }) {
-  const { claim } = await request(`/api/claims/${encodeURIComponent(claimId)}/review`, {
+  const { claim } = await request(`/claims/${encodeURIComponent(claimId)}/review`, {
     method: 'PATCH',
     body: { action, comment },
   })
@@ -95,7 +117,7 @@ export async function saveClaimReview(claimId, { action, comment = '' }) {
 }
 
 export async function saveClaimReconciliation(claimId, { reconciled, comment = '' }) {
-  const { claim } = await request(`/api/claims/${encodeURIComponent(claimId)}/reconciliation`, {
+  const { claim } = await request(`/claims/${encodeURIComponent(claimId)}/reconciliation`, {
     method: 'PATCH',
     body: { reconciled, comment },
   })
@@ -103,7 +125,7 @@ export async function saveClaimReconciliation(claimId, { reconciled, comment = '
 }
 
 export async function reopenClaimReview(claimId, { comment = '' } = {}) {
-  const { claim } = await request(`/api/claims/${encodeURIComponent(claimId)}/review`, {
+  const { claim } = await request(`/claims/${encodeURIComponent(claimId)}/review`, {
     method: 'PATCH',
     body: { action: 'reopen', comment },
   })
@@ -114,16 +136,16 @@ export async function fetchPolicies(query = '') {
   const parameters = new URLSearchParams()
   if (query) parameters.set('q', query)
   const suffix = parameters.size ? `?${parameters.toString()}` : ''
-  const { policies } = await request(`/api/policies${suffix}`)
+  const { policies } = await request(`/policies${suffix}`)
   return policies
 }
 
 export async function fetchUsers() {
-  const { users } = await request('/api/users')
+  const { users } = await request('/users')
   return users
 }
 
 export async function fetchDashboardMetrics() {
-  const { metrics } = await request('/api/dashboard/metrics')
+  const { metrics } = await request('/dashboard/metrics')
   return metrics
 }

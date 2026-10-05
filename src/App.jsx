@@ -69,6 +69,19 @@ function AppShell() {
   const [claims, setClaims] = useState([])
 
   useEffect(() => {
+    const handleUnauthorized = () => {
+      setSession(null)
+      setClaims([])
+      setClaimDocumentFiles([])
+      setStatus({ type: 'error', message: 'Your session has expired or is no longer valid. Please sign in again.' })
+      navigate('/login')
+    }
+
+    window.addEventListener('mediclaim:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('mediclaim:unauthorized', handleUnauthorized)
+  }, [navigate])
+
+  useEffect(() => {
     if (!session?.id) return
     try {
       const { claimant, policyNumber, provider, amount, diagnosis, documentAnalysis } = claimForm

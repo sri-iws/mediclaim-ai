@@ -5,12 +5,10 @@ import { closeDatabase, deleteDemoUsers, updateClaimStatus } from './db.js'
 
 const originalNodeEnv = process.env.NODE_ENV
 const originalJwtSecret = process.env.JWT_SECRET
-const originalAiServiceUrl = process.env.AI_SERVICE_URL
 process.env.NODE_ENV = 'test'
 process.env.JWT_SECRET = 'test-only-secret'
-process.env.AI_SERVICE_URL = 'http://127.0.0.1:8000'
 
-const { app } = await import('./index.js')
+const { app, aiService } = await import('./index.js')
 let server
 let baseUrl
 
@@ -41,11 +39,25 @@ afterAll(async () => {
   else process.env.NODE_ENV = originalNodeEnv
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET
   else process.env.JWT_SECRET = originalJwtSecret
-  if (originalAiServiceUrl === undefined) delete process.env.AI_SERVICE_URL
-  else process.env.AI_SERVICE_URL = originalAiServiceUrl
 })
 
 describe('MediClaim backend services', () => {
+  it('allows any origin and handles CORS preflight requests', async () => {
+    const response = await fetch(`${baseUrl}/api/claims`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://unlisted-origin.example',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type',
+      },
+    })
+
+    expect(response.status).toBe(204)
+  expect(response.headers.get('access-control-allow-origin')).toBe('*')
+    expect(response.headers.get('access-control-allow-methods')).toContain('POST')
+    expect(response.headers.get('access-control-allow-headers')).toContain('Authorization')
+  })
+
   it('provides health status and requires authentication for protected retrievals', async () => {
     const health = await api('/api/health')
     const protectedResponse = await api('/api/claims')
@@ -109,23 +121,18 @@ describe('MediClaim backend services', () => {
       headers: { 'Content-Type': 'application/octet-stream' },
       body: Buffer.from('private claim document'),
     })
-    const originalFetch = globalThis.fetch
+    const originalRun = aiService.run
     let forwardedFile
     let forwardedClaimant
-    globalThis.fetch = async (input, options) => {
-      if (String(input) === 'http://127.0.0.1:8000/api/analyze') {
-        const form = options.body
-        forwardedFile = { name: form.get('file').name, text: await form.get('file').text() }
-        forwardedClaimant = form.get('claimant')
-        return new Response(JSON.stringify({ extracted_fields: { claimant: 'Sample Claimant' } }), {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return originalFetch(input, options)
+    aiService.run = async (command, payload) => {
+      expect(command).toBe('analyze')
+      forwardedFile = { name: payload.filename, text: Buffer.from(payload.content, 'base64').toString() }
+      forwardedClaimant = payload.claimant
+      return { ok: true, data: { extracted_fields: { claimant: 'Sample Claimant' } } }
     }
 
     try {
-      const response = await originalFetch(`${baseUrl}/api/documents/analyze?${new URLSearchParams({
+      const response = await fetch(`${baseUrl}/api/documents/analyze?${new URLSearchParams({
         filename: 'invoice.pdf',
         fields: JSON.stringify({ claimant: 'Sample Claimant' }),
       })}`, {
@@ -145,7 +152,7 @@ describe('MediClaim backend services', () => {
       expect(forwardedFile).toEqual({ name: 'invoice.pdf', text: 'private claim document' })
       expect(forwardedClaimant).toBe('Sample Claimant')
     } finally {
-      globalThis.fetch = originalFetch
+      aiService.run = originalRun
     }
   })
 
@@ -158,16 +165,12 @@ describe('MediClaim backend services', () => {
       method: 'POST',
       body: { codes: '99213' },
     })
-    const originalFetch = globalThis.fetch
+    const originalRun = aiService.run
     let forwardedCodes
-    globalThis.fetch = async (input, options) => {
-      if (String(input) === 'http://127.0.0.1:8000/api/procedure-results') {
-        forwardedCodes = JSON.parse(options.body).codes
-        return new Response(JSON.stringify({ procedures: [{ code: '99213', description: 'Office visit' }] }), {
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return originalFetch(input, options)
+    aiService.run = async (command, payload) => {
+      expect(command).toBe('procedure-results')
+      forwardedCodes = payload.codes
+      return { ok: true, data: { procedures: [{ code: '99213', description: 'Office visit' }] } }
     }
 
     try {
@@ -188,7 +191,7 @@ describe('MediClaim backend services', () => {
       expect(forwardedCodes).toBe('99213, 99214')
       expect(missingInput.response.status).toBe(400)
     } finally {
-      globalThis.fetch = originalFetch
+      aiService.run = originalRun
     }
   })
 

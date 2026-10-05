@@ -2,6 +2,10 @@ import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual, cre
 import { Buffer } from 'node:buffer'
 import process from 'node:process'
 import { promisify } from 'node:util'
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import 'dotenv/config'
 import express from 'express'
 import {
@@ -28,7 +32,29 @@ import {
 const scrypt = promisify(scryptCallback)
 const tokenSecret = process.env.JWT_SECRET || 'local-development-secret-change-before-deployment'
 const tokenLifetimeSeconds = 60 * 60 * 8
-const aiServiceUrl = (process.env.AI_SERVICE_URL || 'https://mediclaim-ai-7s0w.onrender.com').replace(/\/$/, '')
+const pythonCommand = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3')
+const aiRunnerPath = fileURLToPath(new URL('../ai-service/app/runner.py', import.meta.url))
+
+// Calls the Python AI service functions directly via a child process (no HTTP endpoints).
+export const aiService = {
+  run(command, payload) {
+    return new Promise((resolve, reject) => {
+      const child = spawn(pythonCommand, [aiRunnerPath], { cwd: fileURLToPath(new URL('../ai-service', import.meta.url)) })
+      let stdout = ''
+      child.stdout.on('data', (chunk) => { stdout += chunk })
+      child.on('error', reject)
+      child.on('close', () => {
+        try {
+          resolve(JSON.parse(stdout))
+        } catch {
+          reject(new Error('AI service returned an invalid response.'))
+        }
+      })
+      child.stdin.on('error', () => {})
+      child.stdin.end(JSON.stringify({ command, payload }))
+    })
+  },
+}
 const BARE_FIVE_DIGIT_CODE = /(?<![\d()])(\d{5})(?![\d()])/g
 
 function normalizeFiveDigitCodes(value) {
@@ -133,6 +159,13 @@ await seedDatabase()
 
 export const app = express()
 app.disable('x-powered-by')
+app.use((request, response, next) => {
+  response.setHeader('Access-Control-Allow-Origin', '*')
+  response.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+  response.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type, Authorization, X-Upload-Content-Type')
+  if (request.method === 'OPTIONS') return response.sendStatus(204)
+  next()
+})
 app.use(express.json({ limit: '1mb' }))
 
 app.get('/api/health', (_request, response) => response.json({ status: 'ok' }))
@@ -204,25 +237,22 @@ app.post('/api/documents/analyze', express.raw({ type: 'application/octet-stream
     }
   })()
 
-  const formData = new FormData()
-  formData.append('file', new Blob([request.body], { type: contentType }), filename)
+  const payload = { filename, contentType, content: request.body.toString('base64') }
   for (const field of ['claimant', 'policy_number', 'provider', 'diagnosis']) {
     if (typeof claimFields[field] === 'string' && claimFields[field].trim()) {
-      formData.append(field, claimFields[field].trim())
+      payload[field] = claimFields[field].trim()
     }
   }
   if (Number.isFinite(Number(claimFields.amount)) && String(claimFields.amount ?? '').trim()) {
-    formData.append('amount', String(claimFields.amount))
+    payload.amount = Number(claimFields.amount)
   }
 
   try {
-    const aiResponse = await fetch(`${aiServiceUrl}/api/analyze`, { method: 'POST', body: formData })
-    const result = await aiResponse.json().catch(() => ({}))
-    if (!aiResponse.ok) {
-      const message = result.detail || result.message || 'Document analysis could not be completed.'
-      return response.status(aiResponse.status).json({ message })
+    const result = await aiService.run('analyze', payload)
+    if (!result.ok) {
+      return response.status(result.status || 500).json({ message: result.message || 'Document analysis could not be completed.' })
     }
-    response.json(result)
+    response.json(result.data)
   } catch {
     response.status(503).json({ message: 'The document analysis service is unavailable. Start the Python AI service and try again.' })
   }
@@ -234,17 +264,11 @@ const procedureResultsHandler = async (request, response) => {
   if (codes.length > 5000) return response.status(400).json({ message: 'Procedure/service codes must be 5,000 characters or fewer.' })
 
   try {
-    const aiResponse = await fetch(`${aiServiceUrl}/api/procedure-results`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ codes }),
-    })
-    const result = await aiResponse.json().catch(() => ({}))
-    if (!aiResponse.ok) {
-      const message = result.detail || result.message || 'Procedure/service results could not be calculated.'
-      return response.status(aiResponse.status).json({ message })
+    const result = await aiService.run('procedure-results', { codes })
+    if (!result.ok) {
+      return response.status(result.status || 500).json({ message: result.message || 'Procedure/service results could not be calculated.' })
     }
-    response.json(result)
+    response.json(result.data)
   } catch {
     response.status(503).json({ message: 'The procedure/service reference is unavailable. Start the Python AI service and try again.' })
   }
@@ -424,6 +448,15 @@ app.post('/api/claims', async (request, response) => {
 app.get('/api/dashboard/metrics', async (_request, response) => {
   response.json({ metrics: await getDashboardMetrics() })
 })
+
+const distDir = fileURLToPath(new URL('../dist', import.meta.url))
+if (existsSync(distDir)) {
+  app.use(express.static(distDir))
+  app.use((request, response, next) => {
+    if (request.method !== 'GET' || request.path.startsWith('/api/')) return next()
+    response.sendFile(join(distDir, 'index.html'))
+  })
+}
 
 app.use((error, _request, response, next) => {
   if (response.headersSent) return next(error)

@@ -1,3 +1,13 @@
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY index.html vite.config.js ./
+COPY public ./public
+COPY src ./src
+RUN npm run build
+
 FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
@@ -25,6 +35,7 @@ RUN apt-get update \
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server ./server
+COPY --from=frontend --chown=node:node /app/dist ./dist
 
 USER node
 
