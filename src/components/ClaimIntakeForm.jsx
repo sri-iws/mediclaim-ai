@@ -25,7 +25,7 @@ export function ClaimIntakeForm({
     try {
       const documentResults = []
       let extracted
-      try {
+      {
         for (let index = 0; index < selectedClaimFiles.length; index += 1) {
           const file = selectedClaimFiles[index]
           setScanProgress({
@@ -94,45 +94,6 @@ export function ClaimIntakeForm({
           analyzedDocuments: documentResults.map((result) => result.filename),
           analysisSource: 'python',
         }
-      } catch (analysisError) {
-        if (analysisError.status !== undefined && ![404, 502, 503].includes(analysisError.status)) {
-          throw analysisError
-        }
-
-        setScanProgress({ stage: 'AI analysis endpoint is unavailable; using browser OCR instead', progress: 0 })
-        const { scanClaimDocuments } = await import('../documentScanner')
-        const browserFields = await scanClaimDocuments(selectedClaimFiles, setScanProgress)
-        extracted = {
-          ...browserFields,
-          claimant: extractedValueOrNA(browserFields.claimant),
-          policyNumber: extractedValueOrNA(browserFields.policyNumber),
-          provider: extractedValueOrNA(browserFields.provider),
-          amount: extractedValueOrNA(browserFields.amount),
-          diagnosis: extractedValueOrNA(browserFields.diagnosis),
-          extracted: {
-            claimant: extractedValueOrNA(browserFields.claimant),
-            policyNumber: extractedValueOrNA(browserFields.policyNumber),
-            provider: extractedValueOrNA(browserFields.provider),
-            amount: extractedValueOrNA(browserFields.amount),
-            diagnosis: extractedValueOrNA(browserFields.diagnosis),
-            diagnosisCode: browserFields.diagnosisCode,
-            diagnosisCodes: browserFields.diagnosisCodes || (browserFields.diagnosisCode ? [browserFields.diagnosisCode] : []),
-            procedureCode: browserFields.procedureCode,
-            procedureCodes: browserFields.procedureCodes || (browserFields.procedureCode ? [browserFields.procedureCode] : []),
-            cptCodes: browserFields.cptCodes || [],
-            hcpcsCodes: browserFields.hcpcsCodes || [],
-            procedureAmounts: browserFields.procedureAmounts || [],
-          },
-          extractedFields: {
-            policyNumbers: browserFields.policyNumber ? [browserFields.policyNumber] : [],
-            dates: [],
-            amounts: browserFields.amount ? [Number(browserFields.amount)] : [],
-          },
-          findings: [],
-          analyzedDocuments: selectedClaimFiles.map((file) => file.name),
-          analysisSource: 'browser-fallback',
-          analysisWarning: analysisError.message,
-        }
       }
       onClaimExtracted(extracted)
       const claimWithExtractedDetails = {
@@ -149,9 +110,7 @@ export function ClaimIntakeForm({
       const fieldsFound = ['claimant', 'policyNumber', 'provider', 'amount', 'diagnosis']
         .filter((field) => cleanClaimField(extracted[field])).length
       setScanProgress({
-        stage: extracted.analysisSource === 'browser-fallback'
-          ? `Browser OCR fallback complete: ${fieldsFound} field${fieldsFound === 1 ? '' : 's'} found (AI endpoint unavailable).`
-          : `Scan complete: ${fieldsFound} field${fieldsFound === 1 ? '' : 's'} found.`,
+        stage: `Scan complete: ${fieldsFound} field${fieldsFound === 1 ? '' : 's'} found.`,
         progress: 1,
       })
       return claimWithExtractedDetails

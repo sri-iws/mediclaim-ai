@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+const API_BASE_URL = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_API_BASE_URL || 'https://mediclaim-ai-1.onrender.com');
 
 function handleUnauthorized() {
   localStorage.removeItem('mediclaim-token')
@@ -39,7 +41,7 @@ async function request(path, { method = 'GET', body, authenticated = true } = {}
 }
 
 export async function loginWithApi(email, password) {
-  return request('/auth/login', { method: 'POST', body: { email, password }, authenticated: true })
+  return request('/auth/login', { method: 'POST', body: { email, password }, authenticated: false })
 }
 
 export async function registerWithApi({ name, email, password }) {
@@ -48,6 +50,33 @@ export async function registerWithApi({ name, email, password }) {
     body: { name, email, password },
     authenticated: true,
   })
+}
+
+export async function fetchHealth() {
+  return request('/health', { authenticated: false })
+}
+
+export async function fetchCurrentUser() {
+  const { user } = await request('/users/me')
+  return user
+}
+
+export async function fetchClaim(claimId) {
+  const { claim } = await request(`/claims/${encodeURIComponent(claimId)}`)
+  return claim
+}
+
+export async function deleteAllClaims() {
+  return request('/claims', { method: 'DELETE' })
+}
+
+export async function fetchPolicy(policyNumber) {
+  const { policy } = await request(`/policies/${encodeURIComponent(policyNumber)}`)
+  return policy
+}
+
+export async function fetchProcedureResults(codes) {
+  return request('/procedure-results', { method: 'POST', body: { codes } })
 }
 
 export async function fetchClaims() {

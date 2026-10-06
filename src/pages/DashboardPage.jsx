@@ -4,8 +4,7 @@ import logo from '../assets/mediclaim-logo.svg'
 import { getRoleLabel, hasAccess } from '../auth'
 import { assessClaimReference, getClaimVerificationCodes } from '../claimVerification'
 import { ClaimIntakeForm } from '../components/ClaimIntakeForm'
-import { fetchDashboardMetrics } from '../services/api'
-import { verifyCodesWithWorkbook } from '../medicalCodesReference'
+import { fetchDashboardMetrics, fetchProcedureResults } from '../services/api'
 
 const accessModules = [
   {
@@ -540,7 +539,7 @@ function ClaimVerificationPage({ user, onLogout, claims, onSaveReview, onNavigat
 
     setBusy(true)
     try {
-      const verification = await verifyCodesWithWorkbook(codes)
+      const verification = await fetchProcedureResults(codes.join(', '))
       if (requestVersion.current === requestId) setResult(verification)
     } catch (verificationError) {
       if (requestVersion.current === requestId) setError(verificationError.message)

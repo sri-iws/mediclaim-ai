@@ -10,47 +10,16 @@ services:
       PORT: 3001
       JWT_SECRET: ${JWT_SECRET:-}
       SQLITE_DB_PATH: /data/mediclaim.sqlite
-      AI_SERVICE_URL: https://mediclaim-ai-7s0w.onrender.com
     ports:
       - "3001:3001"
     volumes:
       - mediclaim-sqlite-data:/data
-    depends_on:
-      ai-service:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('https://mediclaim-ai-7s0w.onrender.com/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
-
-  ai-service:
-    build:
-      context: ./ai-service
-    container_name: mediclaim-ai-service
-    restart: unless-stopped
-    environment:
-      MAX_UPLOAD_BYTES: 15728640
-      CPT_REFERENCE_CSV: ${CPT_REFERENCE_CSV:-/app/references/cpt_reference.csv}
-      CPT_REFERENCE_VERSION: ${CPT_REFERENCE_VERSION:-unspecified}
-      CPT_PRICING_REFERENCE_CSV: ${CPT_PRICING_REFERENCE_CSV:-/app/references/cpt_pricing_reference.csv}
-      CPT_PRICING_REFERENCE_SOURCE: ${CPT_PRICING_REFERENCE_SOURCE:-}
-      CPT_PRICING_REFERENCE_VERSION: ${CPT_PRICING_REFERENCE_VERSION:-unspecified}
-      CPT_PRICING_REFERENCE_AUTHORIZED: ${CPT_PRICING_REFERENCE_AUTHORIZED:-false}
-      CMS_CODE_REFERENCE_XLSX: ${CMS_CODE_REFERENCE_XLSX:-/app/public/CPT_ICD10_Codes_and_Costs_CMS_2026.xlsx}
-      MEDICAL_CODES_REFERENCE_XLSX: ${MEDICAL_CODES_REFERENCE_XLSX:-/app/public/medical_codes.xlsx}
-    volumes:
-      - ./licensed-reference:/app/references:ro
-      - ./public:/app/public:ro
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
 volumes:
   mediclaim-sqlite-data:

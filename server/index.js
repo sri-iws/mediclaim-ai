@@ -32,10 +32,16 @@ import {
 const scrypt = promisify(scryptCallback)
 const tokenSecret = process.env.JWT_SECRET || 'local-development-secret-change-before-deployment'
 const tokenLifetimeSeconds = 60 * 60 * 8
-const pythonCommand = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3')
+const projectRoot = fileURLToPath(new URL('../', import.meta.url))
+const venvPythonPaths = process.platform === 'win32'
+  ? [join(projectRoot, '.venv', 'Scripts', 'python.exe'), join(projectRoot, '..', '.venv', 'Scripts', 'python.exe')]
+  : [join(projectRoot, '.venv', 'bin', 'python'), join(projectRoot, '..', '.venv', 'bin', 'python')]
+const pythonCommand = process.env.PYTHON_BIN
+  || venvPythonPaths.find((pythonPath) => existsSync(pythonPath))
+  || (process.platform === 'win32' ? 'python' : 'python3')
 const aiRunnerPath = fileURLToPath(new URL('../ai-service/app/runner.py', import.meta.url))
 
-// Calls the Python AI service functions directly via a child process (no HTTP endpoints).
+// Invoke the Python AI functions through the JSON runner; no AI HTTP service is required.
 export const aiService = {
   run(command, payload) {
     return new Promise((resolve, reject) => {

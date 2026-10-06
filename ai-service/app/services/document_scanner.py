@@ -10,7 +10,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 from xml.etree import ElementTree
 
-import fitz
+import pymupdf as fitz
 from openpyxl import load_workbook
 import pytesseract
 from PIL import Image

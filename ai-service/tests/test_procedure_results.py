@@ -6,6 +6,12 @@ import pytest
 from app.services import procedure_results
 
 
+def test_missing_workbook_reference_is_optional(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(procedure_results, "MEDICAL_CODES_REFERENCE_XLSX", tmp_path / "missing.xlsx")
+
+    assert procedure_results._medical_codes_reference() == {"cpt": {}, "icd10": {}}
+
+
 def test_requires_at_least_one_recognized_code() -> None:
     with pytest.raises(ValueError, match="Enter CPT, HCPCS Level II, or ICD-10-CM codes"):
         procedure_results._extract_cpt_codes("Office visit")

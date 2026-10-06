@@ -11,13 +11,15 @@ A React/Vite claims dashboard with a Node/Express API and SQLite-backed persiste
 
 ### Run the APIs and database with Docker Compose
 
-Install and start Docker Desktop, then from the repository root run `docker compose up --build -d`. Compose builds the Node API and Python AI service. SQLite is stored in the `mediclaim-sqlite-data` volume. The frontend remains a local Vite development server; start it separately with `npm run dev` if desired. The API is at `http://localhost:3001` (health check: `/api/health`) and the AI service at `http://localhost:8000`.
+Install and start Docker Desktop, then from the repository root run `docker compose up --build -d`. Compose builds one API image with the Python analysis methods and Tesseract bundled directly alongside the Node backend. SQLite is stored in the `mediclaim-sqlite-data` volume. The frontend remains a local Vite development server; start it separately with `npm run dev` if desired. The API is at `http://localhost:3001` (health check: `/api/health`).
 
-Use `docker compose logs -f api ai-service` to follow service logs and `docker compose down` to stop the stack. SQLite data persists in the `mediclaim-sqlite-data` volume; `docker compose down -v` also deletes that data. Set `NODE_ENV=production` and a strong unique `JWT_SECRET` for production. The Compose file's default environment is for local development; production should use a private volume and regular backups.
+Use `docker compose logs -f api` to follow service logs and `docker compose down` to stop the stack. SQLite data persists in the `mediclaim-sqlite-data` volume; `docker compose down -v` also deletes that data. Set `NODE_ENV=production` and a strong unique `JWT_SECRET` for production. The Compose file's default environment is for local development; production should use a private volume and regular backups.
 
 ### Python document-analysis service
 
-An independent FastAPI OCR and claim-review support service is available under `ai-service/`. Start it with `docker compose up -d ai-service`; it listens on `http://localhost:8000`. The create-claim form sends documents through the authenticated Node API, which proxies them to the Python service and fills detected claimant, policy, provider, amount, and diagnosis fields. See [ai-service/README.md](ai-service/README.md) for setup, request fields, and tests. Analysis is review assistance only and never makes an automated claim decision.
+The Python AI implementation lives under `ai-service/`. The Node backend invokes its runner directly as a local method through a Python subprocess; it does not make an HTTP request to a separate AI service. For local development, install the Python requirements and Tesseract OCR, then set `PYTHON_BIN` if the Python environment is not discoverable. See [ai-service/README.md](ai-service/README.md) for setup and tests. Analysis is review assistance only and never makes an automated claim decision.
+
+The API invokes `analyze_document` and `procedure_results` through `ai-service/app/runner.py`. Keep the `ai-service/` source folder available beside the backend when deploying; the Docker images include it with Python dependencies and Tesseract. `PYTHON_BIN` can point to a specific Python executable when needed.
 
 The API listens on `http://localhost:3001`; Vite proxies `/api` requests to it. On first startup, the API creates or updates the SQLite schema and seeds demo accounts and sample policies. By default the local database is `server/data/mediclaim.sqlite`; set `SQLITE_DB_PATH` to choose another file. SQLite schema updates are applied automatically during startup.
 

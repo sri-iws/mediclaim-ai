@@ -12,9 +12,35 @@ A standalone FastAPI service for extracting text from medical claim documents, p
 
 ## Run locally
 
-Use Python 3.10 or newer. Install Tesseract OCR separately and ensure `tesseract` is on `PATH`; on Windows install the Tesseract executable and English language data. From this directory, install `requirements.txt` and run `uvicorn app.main:app --reload --port 8000`.
+Use Python 3.10 or newer. Install Tesseract OCR separately and ensure `tesseract` is on `PATH`; on Windows install the Tesseract executable and English language data. From the repository root in PowerShell:
+
+```powershell
+Set-Location .\mediclaim-ai\ai-service
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+If PowerShell blocks activation, run the environment's executable directly instead: `.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`. Use `requirements.txt` rather than `requirements-dev.txt` for a runtime-only local install.
 
 The service is also available through the root Compose configuration at `http://localhost:8000` after starting the `ai-service` service. The frontend uploads through the authenticated Node API, which forwards files here. `GET /health` checks availability. Interactive API documentation is at `/docs`.
+
+## Standalone Docker and CI/CD
+
+From the repository root, build and run the standalone image with:
+
+```powershell
+docker build -t mediclaim-ai-service:local .\mediclaim-ai\ai-service
+docker run --rm --name mediclaim-ai-service -p 8000:8000 mediclaim-ai-service:local
+```
+
+Check `http://localhost:8000/health` and open `http://localhost:8000/docs` for the interactive API. To stop the container, press Ctrl+C in the run terminal. The image honors the platform-provided `PORT`, includes Tesseract OCR and English language data, runs as a non-root user, and has a `/health` Docker health check. It builds from the `ai-service/` directory alone; optional reference data must be mounted or provided by the deployment. `MEDICAL_CODES_REFERENCE_XLSX` can point to a mounted workbook for historical/example fallbacks; without one, unavailable or unconfigured references are reported as gaps rather than causing startup or lookup failures.
+
+To run the application API and AI service together instead, run `docker compose up --build -d` from the repository root. The AI service is reachable on port 8000 and the Node API on port 3001. Run `docker compose logs -f ai-service` to inspect startup and `docker compose down` to stop the stack.
+
+The repository GitHub Actions workflow runs the AI-service tests and builds the production Docker image on pull requests that touch the service. After tests pass, pushes to `main` publish `ghcr.io/<owner>/<repository>/ai-service:main` and `:latest`; tags named `ai-service-v*` publish a matching version tag. Images also receive a commit-SHA tag. Deployment platforms should pull the desired immutable SHA or version tag; configure package visibility/access in GitHub Container Registry for the deployment environment. The workflow requires no registry password because it publishes using the repository-scoped `GITHUB_TOKEN`.
 
 ## Analyze a document
 

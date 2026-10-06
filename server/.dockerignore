@@ -1,0 +1,7 @@
+node_modules
+data
+*.test.js
+migrate-json-to-sqlite.js
+Dockerfile
+.dockerignore
+.env

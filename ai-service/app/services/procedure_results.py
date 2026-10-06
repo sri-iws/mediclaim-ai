@@ -45,7 +45,7 @@ MEDICAL_CODES_REFERENCE_XLSX = Path(_configured_medical_codes_xlsx) if _configur
         )
         if candidate.is_file()
     ),
-    Path(__file__).resolve().parents[3] / "public" / "medical_codes.xlsx",
+    Path(__file__).resolve().parents[2] / "public" / "medical_codes.xlsx",
 )
 
 
@@ -188,6 +188,8 @@ def _load_medical_codes_reference(reference_path: str) -> dict[str, dict[str, di
 
 
 def _medical_codes_reference() -> dict[str, dict[str, dict]]:
+    if not MEDICAL_CODES_REFERENCE_XLSX.is_file():
+        return {"cpt": {}, "icd10": {}}
     return _load_medical_codes_reference(str(MEDICAL_CODES_REFERENCE_XLSX))
 
 
